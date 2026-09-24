@@ -30,6 +30,8 @@ pub struct ToiletSession {
     pub poop_type: Option<String>,
     pub notes: Option<String>,
     pub tags: Option<Vec<String>>,
+    #[serde(default, rename = "userEmail")]
+    pub user_email: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -38,12 +40,28 @@ pub struct UserProfile {
     pub name: String,
     pub avatar: String,
     pub tagline: String,
+    #[serde(default)]
+    pub email: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UserAccount {
+    pub id: String,
+    pub email: String,
+    pub name: String,
+    pub avatar: String,
+    #[serde(default)]
+    pub password: Option<String>,
+    #[serde(default, rename = "createdAt")]
+    pub created_at: String,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct AppData {
     pub sessions: Vec<ToiletSession>,
     pub profiles: Vec<UserProfile>,
+    #[serde(default)]
+    pub accounts: Vec<UserAccount>,
 }
 
 #[derive(Clone)]
@@ -63,8 +81,21 @@ impl AppState {
                     if has_mock {
                         data.sessions.retain(|s| !s.id.starts_with("sess-"));
                         data.profiles.retain(|p| p.id != "bram" && p.id != "thijs" && p.id != "lisa" && p.id != "daan" && p.id != "sanne");
-                        let _ = fs::write(&db_path, serde_json::to_string_pretty(&data).unwrap());
                     }
+                    // Auto-sync: ensure any user with sessions exists in profiles
+                    for s in &data.sessions {
+                        let exists = data.profiles.iter().any(|p| p.id == s.user_id || p.name.to_lowercase() == s.user_name.to_lowercase());
+                        if !exists {
+                            data.profiles.push(UserProfile {
+                                id: s.user_id.clone(),
+                                name: s.user_name.clone(),
+                                avatar: s.user_avatar.clone(),
+                                tagline: "Geregistreerde Poeper".into(),
+                                email: s.user_email.clone(),
+                            });
+                        }
+                    }
+                    let _ = fs::write(&db_path, serde_json::to_string_pretty(&data).unwrap());
                     data
                 }
                 Err(_) => Self::default_data(),
@@ -96,6 +127,7 @@ impl AppState {
         AppData {
             sessions: Vec::new(),
             profiles: Vec::new(),
+            accounts: Vec::new(),
         }
     }
 }
@@ -205,6 +237,18 @@ fn main() {
                             let _ = request.as_reader().read_to_string(&mut body);
                             if let Ok(session) = serde_json::from_str::<ToiletSession>(&body) {
                                 let mut guard = state.data.write().unwrap();
+                                // Auto-sync: if session user not in profiles, add them!
+                                let prof_exists = guard.profiles.iter().any(|p| p.id == session.user_id || p.name.to_lowercase() == session.user_name.to_lowercase());
+                                if !prof_exists {
+                                    guard.profiles.push(UserProfile {
+                                        id: session.user_id.clone(),
+                                        name: session.user_name.clone(),
+                                        avatar: session.user_avatar.clone(),
+                                        tagline: "Geregistreerde Poeper".into(),
+                                        email: session.user_email.clone(),
+                                    });
+                                }
+                                guard.sessions.retain(|s| s.id != session.id);
                                 guard.sessions.insert(0, session);
                                 let list = guard.sessions.clone();
                                 drop(guard);
@@ -250,7 +294,11 @@ fn main() {
                             let _ = request.as_reader().read_to_string(&mut body);
                             if let Ok(profile) = serde_json::from_str::<UserProfile>(&body) {
                                 let mut guard = state.data.write().unwrap();
-                                guard.profiles.push(profile);
+                                if let Some(existing) = guard.profiles.iter_mut().find(|p| p.id == profile.id || p.name.to_lowercase() == profile.name.to_lowercase()) {
+                                    *existing = profile;
+                                } else {
+                                    guard.profiles.push(profile);
+                                }
                                 let list = guard.profiles.clone();
                                 drop(guard);
                                 state.persist();
@@ -261,6 +309,94 @@ fn main() {
                             }
                         }
                         _ => {}
+                    }
+                }
+
+                // REST API: /api/accounts
+                if path_part == "/api/accounts" {
+                    match request.method() {
+                        &Method::Get => {
+                            let json = {
+                                let guard = state.data.read().unwrap();
+                                serde_json::to_string(&guard.accounts).unwrap_or_else(|_| "[]".into())
+                            };
+                            let resp = json_response(&json, 200);
+                            let _ = request.respond(resp);
+                            continue;
+                        }
+                        &Method::Post => {
+                            let mut body = String::new();
+                            let _ = request.as_reader().read_to_string(&mut body);
+                            if let Ok(account) = serde_json::from_str::<UserAccount>(&body) {
+                                let mut guard = state.data.write().unwrap();
+                                let email_lower = account.email.to_lowercase();
+                                if guard.accounts.iter().any(|a| a.email.to_lowercase() == email_lower) {
+                                    let resp = json_response(r#"{"success":false,"error":"Er bestaat al een account met dit e-mailadres"}"#, 400);
+                                    let _ = request.respond(resp);
+                                    continue;
+                                }
+                                guard.accounts.push(account.clone());
+                                let prof_exists = guard.profiles.iter().any(|p| p.id == account.id || p.name.to_lowercase() == account.name.to_lowercase());
+                                if !prof_exists {
+                                    guard.profiles.push(UserProfile {
+                                        id: account.id.clone(),
+                                        name: account.name.clone(),
+                                        avatar: account.avatar.clone(),
+                                        tagline: "Geregistreerde Poeper".into(),
+                                        email: Some(account.email.clone()),
+                                    });
+                                }
+                                drop(guard);
+                                state.persist();
+                                let json = serde_json::to_string(&serde_json::json!({
+                                    "success": true,
+                                    "account": account,
+                                })).unwrap_or_else(|_| "{}".into());
+                                let resp = json_response(&json, 201);
+                                let _ = request.respond(resp);
+                                continue;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                // REST API: /api/login
+                if path_part == "/api/login" && request.method() == &Method::Post {
+                    let mut body = String::new();
+                    let _ = request.as_reader().read_to_string(&mut body);
+                    #[derive(Deserialize)]
+                    struct LoginReq {
+                        email: String,
+                        password: Option<String>,
+                    }
+                    if let Ok(login_req) = serde_json::from_str::<LoginReq>(&body) {
+                        let guard = state.data.read().unwrap();
+                        let email_lower = login_req.email.trim().to_lowercase();
+                        if let Some(account) = guard.accounts.iter().find(|a| a.email.to_lowercase() == email_lower) {
+                            if let Some(ref acc_pwd) = account.password {
+                                if let Some(ref req_pwd) = login_req.password {
+                                    if acc_pwd != req_pwd {
+                                        let resp = json_response(r#"{"success":false,"error":"Onjuist wachtwoord"}"#, 401);
+                                        let _ = request.respond(resp);
+                                        continue;
+                                    }
+                                }
+                            }
+                            let profile = guard.profiles.iter().find(|p| p.id == account.id || p.name.to_lowercase() == account.name.to_lowercase()).cloned();
+                            let json = serde_json::to_string(&serde_json::json!({
+                                "success": true,
+                                "account": account,
+                                "profile": profile,
+                            })).unwrap_or_else(|_| "{}".into());
+                            let resp = json_response(&json, 200);
+                            let _ = request.respond(resp);
+                            continue;
+                        } else {
+                            let resp = json_response(r#"{"success":false,"error":"Geen account gevonden met dit e-mailadres"}"#, 404);
+                            let _ = request.respond(resp);
+                            continue;
+                        }
                     }
                 }
 
