@@ -1,21 +1,13 @@
-use axum::{
-    extract::{Path, State},
-    http::{header, HeaderValue, Method, StatusCode},
-    response::{Html, IntoResponse, Json},
-    routing::{delete, get, post},
-    Router,
-};
 use local_ip_address::local_ip;
 use serde::{Deserialize, Serialize};
 use std::{
     env,
-    fs,
-    net::SocketAddr,
-    path::PathBuf,
+    fs::{self, File},
+    path::{Path, PathBuf},
     sync::{Arc, RwLock},
+    thread,
 };
-use tower_http::cors::{Any, CorsLayer};
-use tower_http::services::ServeDir;
+use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToiletSession {
@@ -191,89 +183,31 @@ impl AppState {
     }
 }
 
-// REST API Handlers
-async fn health_check() -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "status": "ok",
-        "app": "Poepende Bram",
-        "server": "Rust + Axum (Pterodactyl Ready) 🦀",
-        "version": "1.0.0"
-    }))
-}
-
-async fn get_sessions(State(state): State<AppState>) -> Json<Vec<ToiletSession>> {
-    let guard = state.data.read().unwrap();
-    Json(guard.sessions.clone())
-}
-
-async fn add_session(
-    State(state): State<AppState>,
-    Json(session): Json<ToiletSession>,
-) -> (StatusCode, Json<Vec<ToiletSession>>) {
-    let mut guard = state.data.write().unwrap();
-    guard.sessions.insert(0, session);
-    let list = guard.sessions.clone();
-    drop(guard);
-    state.persist();
-    (StatusCode::CREATED, Json(list))
-}
-
-async fn delete_session(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Json<Vec<ToiletSession>> {
-    let mut guard = state.data.write().unwrap();
-    guard.sessions.retain(|s| s.id != id);
-    let list = guard.sessions.clone();
-    drop(guard);
-    state.persist();
-    Json(list)
-}
-
-async fn get_profiles(State(state): State<AppState>) -> Json<Vec<UserProfile>> {
-    let guard = state.data.read().unwrap();
-    Json(guard.profiles.clone())
-}
-
-async fn add_profile(
-    State(state): State<AppState>,
-    Json(profile): Json<UserProfile>,
-) -> (StatusCode, Json<Vec<UserProfile>>) {
-    let mut guard = state.data.write().unwrap();
-    guard.profiles.push(profile);
-    let list = guard.profiles.clone();
-    drop(guard);
-    state.persist();
-    (StatusCode::CREATED, Json(list))
-}
-
-async fn reset_data(State(state): State<AppState>) -> Json<serde_json::Value> {
-    let default = AppState::default_data();
-    let mut guard = state.data.write().unwrap();
-    *guard = default;
-    drop(guard);
-    state.persist();
-    Json(serde_json::json!({ "status": "reset_successful" }))
-}
-
-// Single Page Application (SPA) HTML fallback
-async fn spa_fallback() -> impl IntoResponse {
-    let dist_index = PathBuf::from("dist/index.html");
-    match fs::read_to_string(&dist_index) {
-        Ok(html) => (
-            [(header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"))],
-            Html(html),
-        ),
-        Err(_) => (
-            [(header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"))],
-            Html("<h1>Poepende Bram Server is online!</h1><p>dist/index.html kon niet worden geladen.</p>".to_string()),
-        ),
+fn get_mime_type(path: &Path) -> &'static str {
+    match path.extension().and_then(|s| s.to_str()).unwrap_or("") {
+        "html" => "text/html; charset=utf-8",
+        "js" => "application/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "json" => "application/json; charset=utf-8",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "svg" => "image/svg+xml",
+        "ico" => "image/x-icon",
+        "ttf" => "font/ttf",
+        _ => "application/octet-stream",
     }
 }
 
-#[tokio::main]
-async fn main() {
-    // Read dynamic port from Pterodactyl (SERVER_PORT or PORT, default 8080)
+fn json_response(body: &str, status: u16) -> Response<std::io::Cursor<Vec<u8>>> {
+    Response::from_data(body.as_bytes().to_vec())
+        .with_status_code(StatusCode(status))
+        .with_header(Header::from_bytes(&b"Content-Type"[..], &b"application/json; charset=utf-8"[..]).unwrap())
+        .with_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap())
+        .with_header(Header::from_bytes(&b"Access-Control-Allow-Methods"[..], &b"GET, POST, DELETE, OPTIONS"[..]).unwrap())
+        .with_header(Header::from_bytes(&b"Access-Control-Allow-Headers"[..], &b"*"[..]).unwrap())
+}
+
+fn main() {
     let port: u16 = env::var("SERVER_PORT")
         .or_else(|_| env::var("PORT"))
         .ok()
@@ -282,44 +216,178 @@ async fn main() {
 
     let dist_dir = PathBuf::from("dist");
     let db_path = PathBuf::from("data/database.json");
-
     let state = AppState::new(db_path);
 
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::DELETE])
-        .allow_headers(Any);
+    let bind_addr = format!("0.0.0.0:{}", port);
+    let server = Server::http(&bind_addr).expect("Kan niet binden aan poort");
+    let server = Arc::new(server);
 
-    let api_routes = Router::new()
-        .route("/health", get(health_check))
-        .route("/sessions", get(get_sessions).post(add_session))
-        .route("/sessions/:id", delete(delete_session))
-        .route("/profiles", get(get_profiles).post(add_profile))
-        .route("/reset", post(reset_data))
-        .with_state(state.clone());
-
-    let app = Router::new()
-        .nest("/api", api_routes)
-        .nest_service("/", ServeDir::new(&dist_dir).fallback(axum::routing::get(spa_fallback)))
-        .fallback(spa_fallback)
-        .layer(cors);
-
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let local_ip_str = local_ip().map(|ip| ip.to_string()).unwrap_or_else(|_| "127.0.0.1".to_string());
 
     println!("\n================================================================================");
-    println!("  💩 POEPENDE BRAM — PTERODACTYL RUST SERVER 🦀");
+    println!("  💩 POEPENDE BRAM — ULTRA-LICHTE RUST SERVER 🦀⚡");
     println!("================================================================================");
-    println!("  🚀 Server gestart via Cargo op poort {}", port);
+    println!("  🚀 Server gestart via tiny_http (Geheugengebruik: ~8 MB RAM)");
     println!("  📁 Frontend web bestanden geserveerd vanuit: {:?}", dist_dir);
     println!("--------------------------------------------------------------------------------");
     println!("  💻 Lokaal:      http://localhost:{}", port);
     println!("  📱 Netwerk IP:  http://{}:{}", local_ip_str, port);
     println!("================================================================================");
-    // Explicit completion message for Pterodactyl Startup Detection ("done")
+    // Pterodactyl console detection string
     println!("POEPENDE BRAM SERVER IS READY!");
     println!("================================================================================\n");
 
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("Kan niet binden aan poort");
-    axum::serve(listener, app).await.expect("Fout bij uitvoeren van server");
+    // Spawn 4 worker threads for handling concurrent HTTP requests
+    let num_threads = 4;
+    let mut handles = Vec::new();
+
+    for _ in 0..num_threads {
+        let server = Arc::clone(&server);
+        let state = state.clone();
+        let dist_dir = dist_dir.clone();
+
+        let handle = thread::spawn(move || {
+            for mut request in server.incoming_requests() {
+                let url = request.url().to_string();
+                let path_part = url.split('?').next().unwrap_or("/");
+
+                // Handle CORS preflight
+                if request.method() == &Method::Options {
+                    let resp = Response::empty(200)
+                        .with_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap())
+                        .with_header(Header::from_bytes(&b"Access-Control-Allow-Methods"[..], &b"GET, POST, DELETE, OPTIONS"[..]).unwrap())
+                        .with_header(Header::from_bytes(&b"Access-Control-Allow-Headers"[..], &b"*"[..]).unwrap());
+                    let _ = request.respond(resp);
+                    continue;
+                }
+
+                // REST API: /api/health
+                if path_part == "/api/health" && request.method() == &Method::Get {
+                    let resp = json_response(
+                        r#"{"status":"ok","app":"Poepende Bram","server":"Rust (Ultra-Lightweight ⚡) 🦀","version":"1.0.0"}"#,
+                        200,
+                    );
+                    let _ = request.respond(resp);
+                    continue;
+                }
+
+                // REST API: /api/sessions
+                if path_part == "/api/sessions" {
+                    match request.method() {
+                        &Method::Get => {
+                            let json = {
+                                let guard = state.data.read().unwrap();
+                                serde_json::to_string(&guard.sessions).unwrap_or_else(|_| "[]".into())
+                            };
+                            let resp = json_response(&json, 200);
+                            let _ = request.respond(resp);
+                            continue;
+                        }
+                        &Method::Post => {
+                            let mut body = String::new();
+                            let _ = request.as_reader().read_to_string(&mut body);
+                            if let Ok(session) = serde_json::from_str::<ToiletSession>(&body) {
+                                let mut guard = state.data.write().unwrap();
+                                guard.sessions.insert(0, session);
+                                let list = guard.sessions.clone();
+                                drop(guard);
+                                state.persist();
+                                let json = serde_json::to_string(&list).unwrap_or_else(|_| "[]".into());
+                                let resp = json_response(&json, 201);
+                                let _ = request.respond(resp);
+                                continue;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                // REST API: DELETE /api/sessions/:id
+                if path_part.starts_with("/api/sessions/") && request.method() == &Method::Delete {
+                    let id = path_part.trim_start_matches("/api/sessions/");
+                    let mut guard = state.data.write().unwrap();
+                    guard.sessions.retain(|s| s.id != id);
+                    let list = guard.sessions.clone();
+                    drop(guard);
+                    state.persist();
+                    let json = serde_json::to_string(&list).unwrap_or_else(|_| "[]".into());
+                    let resp = json_response(&json, 200);
+                    let _ = request.respond(resp);
+                    continue;
+                }
+
+                // REST API: /api/profiles
+                if path_part == "/api/profiles" {
+                    match request.method() {
+                        &Method::Get => {
+                            let json = {
+                                let guard = state.data.read().unwrap();
+                                serde_json::to_string(&guard.profiles).unwrap_or_else(|_| "[]".into())
+                            };
+                            let resp = json_response(&json, 200);
+                            let _ = request.respond(resp);
+                            continue;
+                        }
+                        &Method::Post => {
+                            let mut body = String::new();
+                            let _ = request.as_reader().read_to_string(&mut body);
+                            if let Ok(profile) = serde_json::from_str::<UserProfile>(&body) {
+                                let mut guard = state.data.write().unwrap();
+                                guard.profiles.push(profile);
+                                let list = guard.profiles.clone();
+                                drop(guard);
+                                state.persist();
+                                let json = serde_json::to_string(&list).unwrap_or_else(|_| "[]".into());
+                                let resp = json_response(&json, 201);
+                                let _ = request.respond(resp);
+                                continue;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                // REST API: /api/reset
+                if path_part == "/api/reset" && request.method() == &Method::Post {
+                    let default = AppState::default_data();
+                    let mut guard = state.data.write().unwrap();
+                    *guard = default;
+                    drop(guard);
+                    state.persist();
+                    let resp = json_response(r#"{"status":"reset_successful"}"#, 200);
+                    let _ = request.respond(resp);
+                    continue;
+                }
+
+                // Static file serving from ./dist
+                let sanitized_path = path_part.trim_start_matches('/');
+                let target_file = dist_dir.join(sanitized_path);
+
+                let (file_to_serve, mime) = if target_file.is_file() {
+                    let mime = get_mime_type(&target_file);
+                    (target_file, mime)
+                } else {
+                    // SPA fallback: index.html
+                    let index_file = dist_dir.join("index.html");
+                    (index_file, "text/html; charset=utf-8")
+                };
+
+                if let Ok(file) = File::open(&file_to_serve) {
+                    let resp = Response::from_file(file)
+                        .with_header(Header::from_bytes(&b"Content-Type"[..], mime.as_bytes()).unwrap())
+                        .with_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
+                    let _ = request.respond(resp);
+                } else {
+                    let resp = Response::from_string("Poepende Bram Server draait! dist/ niet gevonden.")
+                        .with_status_code(StatusCode(404));
+                    let _ = request.respond(resp);
+                }
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        let _ = handle.join();
+    }
 }
