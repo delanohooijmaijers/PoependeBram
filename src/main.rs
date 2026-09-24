@@ -56,7 +56,17 @@ impl AppState {
     fn new(db_path: PathBuf) -> Self {
         let initial_data = if db_path.exists() {
             match fs::read_to_string(&db_path) {
-                Ok(content) => serde_json::from_str(&content).unwrap_or_else(|_| Self::default_data()),
+                Ok(content) => {
+                    let mut data: AppData = serde_json::from_str(&content).unwrap_or_else(|_| Self::default_data());
+                    let has_mock = data.sessions.iter().any(|s| s.id.starts_with("sess-"))
+                        || data.profiles.iter().any(|p| p.id == "bram" || p.id == "thijs" || p.id == "lisa" || p.id == "daan" || p.id == "sanne");
+                    if has_mock {
+                        data.sessions.retain(|s| !s.id.starts_with("sess-"));
+                        data.profiles.retain(|p| p.id != "bram" && p.id != "thijs" && p.id != "lisa" && p.id != "daan" && p.id != "sanne");
+                        let _ = fs::write(&db_path, serde_json::to_string_pretty(&data).unwrap());
+                    }
+                    data
+                }
                 Err(_) => Self::default_data(),
             }
         } else {
@@ -83,103 +93,10 @@ impl AppState {
     }
 
     fn default_data() -> AppData {
-        let profiles = vec![
-            UserProfile {
-                id: "bram".into(),
-                name: "Bram".into(),
-                avatar: "B".into(),
-                tagline: "Opperpoeper & Troonmeester".into(),
-            },
-            UserProfile {
-                id: "thijs".into(),
-                name: "Thijs".into(),
-                avatar: "T".into(),
-                tagline: "De Snelle Sprinter".into(),
-            },
-            UserProfile {
-                id: "lisa".into(),
-                name: "Lisa".into(),
-                avatar: "L".into(),
-                tagline: "Zen Troonzitter".into(),
-            },
-            UserProfile {
-                id: "daan".into(),
-                name: "Daan".into(),
-                avatar: "D".into(),
-                tagline: "Marathon Scheter".into(),
-            },
-            UserProfile {
-                id: "sanne".into(),
-                name: "Sanne".into(),
-                avatar: "S".into(),
-                tagline: "Koninklijke Bezoeker".into(),
-            },
-        ];
-
-        let sessions = vec![
-            ToiletSession {
-                id: "sess-1".into(),
-                user_id: "bram".into(),
-                user_name: "Bram".into(),
-                user_avatar: "B".into(),
-                location_name: "Bram's Heilige Troon (Thuis)".into(),
-                latitude: 52.3676,
-                longitude: 4.9041,
-                timestamp: "2026-09-24T16:30:00Z".into(),
-                duration_seconds: 1692, // 28m 12s - RECORD LONGEST!
-                rating: 5,
-                poop_type: Some("Koninklijk".into()),
-                notes: Some("Volledig YouTube gekeken. Mijn benen sliepen helemaal toen ik opstond. Absolute topervaring.".into()),
-                tags: Some(vec!["Zacht papier".into(), "Stilte".into(), "Koninklijk comfort".into()]),
-            },
-            ToiletSession {
-                id: "sess-2".into(),
-                user_id: "thijs".into(),
-                user_name: "Thijs".into(),
-                user_avatar: "T".into(),
-                location_name: "Station Utrecht Centraal WC".into(),
-                latitude: 52.0894,
-                longitude: 5.1103,
-                timestamp: "2026-09-24T01:30:00Z".into(),
-                duration_seconds: 42, // 42s - RECORD SHORTEST!
-                rating: 2,
-                poop_type: Some("Soepel & Razendsnel".into()),
-                notes: Some("Kostte €0,70 bij Sanifair, maar binnen 42 seconden stond ik alweer op spoor 5!".into()),
-                tags: Some(vec!["Haast".into(), "Duur toilet".into()]),
-            },
-            ToiletSession {
-                id: "sess-3".into(),
-                user_id: "lisa".into(),
-                user_name: "Lisa".into(),
-                user_avatar: "L".into(),
-                location_name: "Kantoor Zuidas (12e Verdieping)".into(),
-                latitude: 52.3364,
-                longitude: 4.8732,
-                timestamp: "2026-09-23T15:00:00Z".into(),
-                duration_seconds: 495,
-                rating: 4,
-                poop_type: Some("De Vlotte Boodschap".into()),
-                notes: Some("Heerlijke rust op de 12e. 3-laags papier en uitzicht over de stad.".into()),
-                tags: Some(vec!["Kantoortijd".into(), "Zacht papier".into()]),
-            },
-            ToiletSession {
-                id: "sess-4".into(),
-                user_id: "daan".into(),
-                user_name: "Daan".into(),
-                user_avatar: "D".into(),
-                location_name: "Basic-Fit Kleedkamer WC".into(),
-                latitude: 52.3702,
-                longitude: 4.8952,
-                timestamp: "2026-09-23T01:00:00Z".into(),
-                duration_seconds: 98,
-                rating: 3,
-                poop_type: Some("Explosief Avontuur".into()),
-                notes: Some("De pre-workout shake deed zijn werk iets te snel.".into()),
-                tags: Some(vec!["Pre-workout".into(), "Gym life".into()]),
-            },
-        ];
-
-        AppData { sessions, profiles }
+        AppData {
+            sessions: Vec::new(),
+            profiles: Vec::new(),
+        }
     }
 }
 
