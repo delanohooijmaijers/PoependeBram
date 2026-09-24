@@ -87,31 +87,31 @@ impl AppState {
             UserProfile {
                 id: "bram".into(),
                 name: "Bram".into(),
-                avatar: "👑".into(),
+                avatar: "B".into(),
                 tagline: "Opperpoeper & Troonmeester".into(),
             },
             UserProfile {
                 id: "thijs".into(),
                 name: "Thijs".into(),
-                avatar: "⚡".into(),
+                avatar: "T".into(),
                 tagline: "De Snelle Sprinter".into(),
             },
             UserProfile {
                 id: "lisa".into(),
                 name: "Lisa".into(),
-                avatar: "🌸".into(),
+                avatar: "L".into(),
                 tagline: "Zen Troonzitter".into(),
             },
             UserProfile {
                 id: "daan".into(),
                 name: "Daan".into(),
-                avatar: "🚀".into(),
+                avatar: "D".into(),
                 tagline: "Marathon Scheter".into(),
             },
             UserProfile {
                 id: "sanne".into(),
                 name: "Sanne".into(),
-                avatar: "✨".into(),
+                avatar: "S".into(),
                 tagline: "Koninklijke Bezoeker".into(),
             },
         ];
@@ -121,7 +121,7 @@ impl AppState {
                 id: "sess-1".into(),
                 user_id: "bram".into(),
                 user_name: "Bram".into(),
-                user_avatar: "👑".into(),
+                user_avatar: "B".into(),
                 location_name: "Bram's Heilige Troon (Thuis)".into(),
                 latitude: 52.3676,
                 longitude: 4.9041,
@@ -136,7 +136,7 @@ impl AppState {
                 id: "sess-2".into(),
                 user_id: "thijs".into(),
                 user_name: "Thijs".into(),
-                user_avatar: "⚡".into(),
+                user_avatar: "T".into(),
                 location_name: "Station Utrecht Centraal WC".into(),
                 latitude: 52.0894,
                 longitude: 5.1103,
@@ -151,7 +151,7 @@ impl AppState {
                 id: "sess-3".into(),
                 user_id: "lisa".into(),
                 user_name: "Lisa".into(),
-                user_avatar: "🌸".into(),
+                user_avatar: "L".into(),
                 location_name: "Kantoor Zuidas (12e Verdieping)".into(),
                 latitude: 52.3364,
                 longitude: 4.8732,
@@ -166,7 +166,7 @@ impl AppState {
                 id: "sess-4".into(),
                 user_id: "daan".into(),
                 user_name: "Daan".into(),
-                user_avatar: "🚀".into(),
+                user_avatar: "D".into(),
                 location_name: "Basic-Fit Kleedkamer WC".into(),
                 latitude: 52.3702,
                 longitude: 4.8952,
@@ -225,13 +225,13 @@ fn main() {
     let local_ip_str = local_ip().map(|ip| ip.to_string()).unwrap_or_else(|_| "127.0.0.1".to_string());
 
     println!("\n================================================================================");
-    println!("  💩 POEPENDE BRAM — ULTRA-LICHTE RUST SERVER 🦀⚡");
+    println!("  POEPENDE BRAM -- ULTRA-LICHTE RUST SERVER");
     println!("================================================================================");
-    println!("  🚀 Server gestart via tiny_http (Geheugengebruik: ~8 MB RAM)");
-    println!("  📁 Frontend web bestanden geserveerd vanuit: {:?}", dist_dir);
+    println!("  Server gestart via tiny_http (Geheugengebruik: ~8 MB RAM)");
+    println!("  Frontend web bestanden geserveerd vanuit: {:?}", dist_dir);
     println!("--------------------------------------------------------------------------------");
-    println!("  💻 Lokaal:      http://localhost:{}", port);
-    println!("  📱 Netwerk IP:  http://{}:{}", local_ip_str, port);
+    println!("  Lokaal:      http://localhost:{}", port);
+    println!("  Netwerk IP:  http://{}:{}", local_ip_str, port);
     println!("================================================================================");
     // Pterodactyl console detection string
     println!("POEPENDE BRAM SERVER IS READY!");
@@ -264,7 +264,7 @@ fn main() {
                 // REST API: /api/health
                 if path_part == "/api/health" && request.method() == &Method::Get {
                     let resp = json_response(
-                        r#"{"status":"ok","app":"Poepende Bram","server":"Rust (Ultra-Lightweight ⚡) 🦀","version":"1.0.0"}"#,
+                        r#"{"status":"ok","app":"Poepende Bram","server":"Rust (Ultra-Lightweight)","version":"1.0.0"}"#,
                         200,
                     );
                     let _ = request.respond(resp);
