@@ -1,0 +1,12 @@
+{
+  "name": "poepende-bram",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Poepende Bram Worker and Static Assets",
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "3.114.17"
+  }
+}
