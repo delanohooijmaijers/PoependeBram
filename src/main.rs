@@ -42,6 +42,8 @@ pub struct UserProfile {
     pub tagline: String,
     #[serde(default)]
     pub email: Option<String>,
+    #[serde(default)]
+    pub coins: Option<i64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -92,6 +94,7 @@ impl AppState {
                                 avatar: s.user_avatar.clone(),
                                 tagline: "Geregistreerde Poeper".into(),
                                 email: s.user_email.clone(),
+                                coins: Some(100),
                             });
                         }
                     }
@@ -109,7 +112,15 @@ impl AppState {
                                 avatar: a.avatar.clone(),
                                 tagline: "Geregistreerde Poeper".into(),
                                 email: Some(a.email.clone()),
+                                coins: Some(100),
                             });
+                        }
+                    }
+                    // Auto-sync coins: ensure every profile has at least 100 coins + 25 per session!
+                    for p in &mut data.profiles {
+                        if p.coins.is_none() {
+                            let sess_count = data.sessions.iter().filter(|s| s.user_id == p.id || s.user_name.to_lowercase() == p.name.to_lowercase()).count() as i64;
+                            p.coins = Some(100 + sess_count * 25);
                         }
                     }
                     let _ = fs::write(&db_path, serde_json::to_string_pretty(&data).unwrap());
@@ -481,7 +492,14 @@ fn main() {
                                         avatar: session.user_avatar.clone(),
                                         tagline: "Geregistreerde Poeper".into(),
                                         email: session.user_email.clone(),
+                                        coins: Some(100),
                                     });
+                                }
+                                // Award coins for this toilet visit (+25 base + rating * 5)
+                                let earned_coins = 25 + (session.rating as i64) * 5;
+                                if let Some(prof) = guard.profiles.iter_mut().find(|p| p.id == session.user_id || p.name.to_lowercase() == session.user_name.to_lowercase()) {
+                                    let cur = prof.coins.unwrap_or(100);
+                                    prof.coins = Some(cur + earned_coins);
                                 }
                                 guard.sessions.retain(|s| s.id != session.id);
                                 guard.sessions.insert(0, session);
@@ -627,7 +645,12 @@ fn main() {
                                     avatar: s.user_avatar.clone(),
                                     tagline: "Geregistreerde Poeper".into(),
                                     email: s.user_email.clone(),
+                                    coins: Some(100),
                                 });
+                            }
+                            if let Some(prof) = guard.profiles.iter_mut().find(|p| p.id == s.user_id || p.name.to_lowercase() == s.user_name.to_lowercase()) {
+                                let cur = prof.coins.unwrap_or(100);
+                                prof.coins = Some(cur + 25);
                             }
                             guard.sessions.retain(|existing| existing.id != s.id);
                             guard.sessions.push(s);
@@ -744,6 +767,7 @@ fn main() {
                                         avatar: account.avatar.clone(),
                                         tagline: "Geregistreerde Poeper".into(),
                                         email: Some(account.email.clone()),
+                                        coins: Some(100),
                                     });
                                 }
                                 drop(guard);
@@ -800,6 +824,7 @@ fn main() {
                                     avatar: account.avatar.clone(),
                                     tagline: "Geregistreerde Poeper".into(),
                                     email: Some(account.email.clone()),
+                                    coins: Some(100),
                                 };
                                 guard.profiles.push(new_p.clone());
                                 new_p
@@ -830,6 +855,186 @@ fn main() {
                     drop(guard);
                     state.persist();
                     let resp = json_response(r#"{"status":"reset_successful","message":"Sessies zijn gewist; accounts zijn behouden"}"#, 200);
+                    let _ = request.respond(resp);
+                    continue;
+                }
+
+                // REST API: GET /api/casino/balance
+                if path_part == "/api/casino/balance" && request.method() == &Method::Get {
+                    let guard = state.data.read().unwrap();
+                    let query_str = url.split('?').nth(1).unwrap_or("");
+                    let mut user_param = String::new();
+                    for pair in query_str.split('&') {
+                        let mut kv = pair.split('=');
+                        if let (Some(k), Some(v)) = (kv.next(), kv.next()) {
+                            if k == "userId" || k == "user" || k == "name" {
+                                user_param = v.replace("%20", " ");
+                            }
+                        }
+                    }
+
+                    if !user_param.is_empty() {
+                        let lower = user_param.to_lowercase();
+                        if let Some(p) = guard.profiles.iter().find(|p| p.id.to_lowercase() == lower || p.name.to_lowercase() == lower) {
+                            let sess_count = guard.sessions.iter().filter(|s| s.user_id == p.id || s.user_name.to_lowercase() == p.name.to_lowercase()).count();
+                            let resp = json_response(&serde_json::json!({
+                                "success": true,
+                                "userId": p.id,
+                                "userName": p.name,
+                                "avatar": p.avatar,
+                                "coins": p.coins.unwrap_or(100),
+                                "sessionCount": sess_count,
+                            }).to_string(), 200);
+                            let _ = request.respond(resp);
+                            continue;
+                        }
+                    }
+
+                    // Return all profiles with coin balances and session count
+                    let list: Vec<serde_json::Value> = guard.profiles.iter().map(|p| {
+                        let sess_count = guard.sessions.iter().filter(|s| s.user_id == p.id || s.user_name.to_lowercase() == p.name.to_lowercase()).count();
+                        serde_json::json!({
+                            "id": p.id,
+                            "name": p.name,
+                            "avatar": p.avatar,
+                            "coins": p.coins.unwrap_or(100),
+                            "sessionCount": sess_count,
+                        })
+                    }).collect();
+
+                    let resp = json_response(&serde_json::json!({
+                        "success": true,
+                        "profiles": list,
+                    }).to_string(), 200);
+                    let _ = request.respond(resp);
+                    continue;
+                }
+
+                // REST API: POST /api/casino/update
+                if path_part == "/api/casino/update" && request.method() == &Method::Post {
+                    let mut body = String::new();
+                    let _ = request.as_reader().read_to_string(&mut body);
+                    #[derive(Deserialize)]
+                    struct CasinoUpdateReq {
+                        #[serde(rename = "userId")]
+                        user_id: Option<String>,
+                        #[serde(rename = "userName")]
+                        user_name: Option<String>,
+                        delta: Option<i64>,
+                        coins: Option<i64>,
+                    }
+
+                    if let Ok(req) = serde_json::from_str::<CasinoUpdateReq>(&body) {
+                        let mut guard = state.data.write().unwrap();
+                        let target_id = req.user_id.clone().unwrap_or_default();
+                        let target_name = req.user_name.clone().unwrap_or_default();
+                        let id_lower = target_id.to_lowercase();
+                        let name_lower = target_name.to_lowercase();
+
+                        let idx = guard.profiles.iter().position(|p| {
+                            (!id_lower.is_empty() && p.id.to_lowercase() == id_lower) ||
+                            (!name_lower.is_empty() && p.name.to_lowercase() == name_lower)
+                        });
+
+                        let user_idx = if let Some(i) = idx {
+                            i
+                        } else {
+                            // Create default profile for this gambler
+                            let name = if !target_name.is_empty() { target_name.clone() } else { "Bram".to_string() };
+                            let id = if !target_id.is_empty() { target_id.clone() } else { format!("user-{}", name.to_lowercase()) };
+                            let avatar = name.chars().next().unwrap_or('B').to_uppercase().to_string();
+                            guard.profiles.push(UserProfile {
+                                id,
+                                name,
+                                avatar,
+                                tagline: "Casino Gokker".into(),
+                                email: None,
+                                coins: Some(100),
+                            });
+                            guard.profiles.len() - 1
+                        };
+
+                        let current = guard.profiles[user_idx].coins.unwrap_or(100);
+                        let new_coins = if let Some(c) = req.coins {
+                            c.max(0)
+                        } else if let Some(d) = req.delta {
+                            (current + d).max(0)
+                        } else {
+                            current
+                        };
+
+                        guard.profiles[user_idx].coins = Some(new_coins);
+                        let final_profile = guard.profiles[user_idx].clone();
+                        drop(guard);
+                        state.persist();
+
+                        let resp = json_response(&serde_json::json!({
+                            "success": true,
+                            "userId": final_profile.id,
+                            "userName": final_profile.name,
+                            "coins": final_profile.coins.unwrap_or(new_coins),
+                        }).to_string(), 200);
+                        let _ = request.respond(resp);
+                        continue;
+                    } else {
+                        let resp = json_response(r#"{"success":false,"error":"Ongeldig verzoek"}"#, 400);
+                        let _ = request.respond(resp);
+                        continue;
+                    }
+                }
+
+                // REST API: POST /api/casino/faucet ("Even persen" voor gratis munten)
+                if path_part == "/api/casino/faucet" && request.method() == &Method::Post {
+                    let mut body = String::new();
+                    let _ = request.as_reader().read_to_string(&mut body);
+                    #[derive(Deserialize)]
+                    struct FaucetReq {
+                        #[serde(rename = "userId")]
+                        user_id: Option<String>,
+                        #[serde(rename = "userName")]
+                        user_name: Option<String>,
+                    }
+
+                    let req = serde_json::from_str::<FaucetReq>(&body).unwrap_or(FaucetReq { user_id: None, user_name: None });
+                    let mut guard = state.data.write().unwrap();
+                    let target_id = req.user_id.clone().unwrap_or_default();
+                    let target_name = req.user_name.clone().unwrap_or_default();
+                    let id_lower = target_id.to_lowercase();
+                    let name_lower = target_name.to_lowercase();
+
+                    let user_idx = if let Some(i) = guard.profiles.iter().position(|p| {
+                        (!id_lower.is_empty() && p.id.to_lowercase() == id_lower) ||
+                        (!name_lower.is_empty() && p.name.to_lowercase() == name_lower)
+                    }) {
+                        i
+                    } else if !guard.profiles.is_empty() {
+                        0
+                    } else {
+                        guard.profiles.push(UserProfile {
+                            id: "user-bram".into(),
+                            name: "Bram".into(),
+                            avatar: "B".into(),
+                            tagline: "Casino Gokker".into(),
+                            email: None,
+                            coins: Some(100),
+                        });
+                        0
+                    };
+
+                    let current = guard.profiles[user_idx].coins.unwrap_or(100);
+                    let new_coins = current + 50;
+                    guard.profiles[user_idx].coins = Some(new_coins);
+                    let final_profile = guard.profiles[user_idx].clone();
+                    drop(guard);
+                    state.persist();
+
+                    let resp = json_response(&serde_json::json!({
+                        "success": true,
+                        "userId": final_profile.id,
+                        "userName": final_profile.name,
+                        "coins": new_coins,
+                        "message": "💩 Lekker geperst! Je hebt +50 Poep Munten verdiend!",
+                    }).to_string(), 200);
                     let _ = request.respond(resp);
                     continue;
                 }
