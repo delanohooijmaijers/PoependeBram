@@ -50,7 +50,7 @@ pub struct UserAccount {
     pub email: String,
     pub name: String,
     pub avatar: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub password: Option<String>,
     #[serde(default, rename = "createdAt")]
     pub created_at: String,
@@ -237,6 +237,15 @@ fn main() {
                             let _ = request.as_reader().read_to_string(&mut body);
                             if let Ok(session) = serde_json::from_str::<ToiletSession>(&body) {
                                 let mut guard = state.data.write().unwrap();
+                                // Protect registered accounts: others cannot post in their name
+                                if let Some(acc) = guard.accounts.iter().find(|a| a.id == session.user_id || a.name.to_lowercase() == session.user_name.to_lowercase()) {
+                                    let matches_email = session.user_email.as_ref().map(|e| e.trim().to_lowercase()) == Some(acc.email.trim().to_lowercase());
+                                    if !matches_email {
+                                        let resp = json_response(r#"{"error":"Dit account is beveiligd met een wachtwoord. Log eerst in om sessies te plaatsen."}"#, 403);
+                                        let _ = request.respond(resp);
+                                        continue;
+                                    }
+                                }
                                 // Auto-sync: if session user not in profiles, add them!
                                 let prof_exists = guard.profiles.iter().any(|p| p.id == session.user_id || p.name.to_lowercase() == session.user_name.to_lowercase());
                                 if !prof_exists {
@@ -283,7 +292,13 @@ fn main() {
                         &Method::Get => {
                             let json = {
                                 let guard = state.data.read().unwrap();
-                                serde_json::to_string(&guard.profiles).unwrap_or_else(|_| "[]".into())
+                                // Redact emails in public profile list to protect privacy
+                                let public_profiles: Vec<UserProfile> = guard.profiles.iter().map(|p| {
+                                    let mut sanitized = p.clone();
+                                    sanitized.email = None;
+                                    sanitized
+                                }).collect();
+                                serde_json::to_string(&public_profiles).unwrap_or_else(|_| "[]".into())
                             };
                             let resp = json_response(&json, 200);
                             let _ = request.respond(resp);
@@ -294,6 +309,13 @@ fn main() {
                             let _ = request.as_reader().read_to_string(&mut body);
                             if let Ok(profile) = serde_json::from_str::<UserProfile>(&body) {
                                 let mut guard = state.data.write().unwrap();
+                                // Prevent guests from overwriting a registered account's profile
+                                let is_registered = guard.accounts.iter().any(|a| a.id == profile.id || a.name.to_lowercase() == profile.name.to_lowercase());
+                                if is_registered && profile.email.is_none() {
+                                    let resp = json_response(r#"{"error":"Dit profiel is beschermd door een e-mailaccount"}"#, 403);
+                                    let _ = request.respond(resp);
+                                    continue;
+                                }
                                 if let Some(existing) = guard.profiles.iter_mut().find(|p| p.id == profile.id || p.name.to_lowercase() == profile.name.to_lowercase()) {
                                     *existing = profile;
                                 } else {
@@ -316,11 +338,8 @@ fn main() {
                 if path_part == "/api/accounts" {
                     match request.method() {
                         &Method::Get => {
-                            let json = {
-                                let guard = state.data.read().unwrap();
-                                serde_json::to_string(&guard.accounts).unwrap_or_else(|_| "[]".into())
-                            };
-                            let resp = json_response(&json, 200);
+                            // Never expose user accounts or credentials via public GET
+                            let resp = json_response("[]", 200);
                             let _ = request.respond(resp);
                             continue;
                         }
@@ -329,7 +348,12 @@ fn main() {
                             let _ = request.as_reader().read_to_string(&mut body);
                             if let Ok(account) = serde_json::from_str::<UserAccount>(&body) {
                                 let mut guard = state.data.write().unwrap();
-                                let email_lower = account.email.to_lowercase();
+                                let email_lower = account.email.trim().to_lowercase();
+                                if email_lower.is_empty() || !email_lower.contains('@') {
+                                    let resp = json_response(r#"{"success":false,"error":"Voer een geldig e-mailadres in"}"#, 400);
+                                    let _ = request.respond(resp);
+                                    continue;
+                                }
                                 if guard.accounts.iter().any(|a| a.email.to_lowercase() == email_lower) {
                                     let resp = json_response(r#"{"success":false,"error":"Er bestaat al een account met dit e-mailadres"}"#, 400);
                                     let _ = request.respond(resp);
@@ -381,6 +405,10 @@ fn main() {
                                         let _ = request.respond(resp);
                                         continue;
                                     }
+                                } else {
+                                    let resp = json_response(r#"{"success":false,"error":"Vul je wachtwoord in"}"#, 401);
+                                    let _ = request.respond(resp);
+                                    continue;
                                 }
                             }
                             let profile = guard.profiles.iter().find(|p| p.id == account.id || p.name.to_lowercase() == account.name.to_lowercase()).cloned();
@@ -402,12 +430,12 @@ fn main() {
 
                 // REST API: /api/reset
                 if path_part == "/api/reset" && request.method() == &Method::Post {
-                    let default = AppState::default_data();
+                    // Only clear sessions - protect user accounts and registered profiles!
                     let mut guard = state.data.write().unwrap();
-                    *guard = default;
+                    guard.sessions.clear();
                     drop(guard);
                     state.persist();
-                    let resp = json_response(r#"{"status":"reset_successful"}"#, 200);
+                    let resp = json_response(r#"{"status":"reset_successful","message":"Sessies zijn gewist; accounts zijn behouden"}"#, 200);
                     let _ = request.respond(resp);
                     continue;
                 }
