@@ -95,6 +95,23 @@ impl AppState {
                             });
                         }
                     }
+                    // Auto-sync: ensure all registered accounts have a profile with matching id and email
+                    for a in &data.accounts {
+                        if let Some(p) = data.profiles.iter_mut().find(|p| p.id == a.id || p.name.to_lowercase() == a.name.to_lowercase() || p.email.as_ref().map(|e| e.to_lowercase()) == Some(a.email.to_lowercase())) {
+                            p.id = a.id.clone();
+                            p.name = a.name.clone();
+                            p.avatar = a.avatar.clone();
+                            p.email = Some(a.email.clone());
+                        } else {
+                            data.profiles.push(UserProfile {
+                                id: a.id.clone(),
+                                name: a.name.clone(),
+                                avatar: a.avatar.clone(),
+                                tagline: "Geregistreerde Poeper".into(),
+                                email: Some(a.email.clone()),
+                            });
+                        }
+                    }
                     let _ = fs::write(&db_path, serde_json::to_string_pretty(&data).unwrap());
                     data
                 }
@@ -292,13 +309,7 @@ fn main() {
                         &Method::Get => {
                             let json = {
                                 let guard = state.data.read().unwrap();
-                                // Redact emails in public profile list to protect privacy
-                                let public_profiles: Vec<UserProfile> = guard.profiles.iter().map(|p| {
-                                    let mut sanitized = p.clone();
-                                    sanitized.email = None;
-                                    sanitized
-                                }).collect();
-                                serde_json::to_string(&public_profiles).unwrap_or_else(|_| "[]".into())
+                                serde_json::to_string(&guard.profiles).unwrap_or_else(|_| "[]".into())
                             };
                             let resp = json_response(&json, 200);
                             let _ = request.respond(resp);
@@ -360,8 +371,12 @@ fn main() {
                                     continue;
                                 }
                                 guard.accounts.push(account.clone());
-                                let prof_exists = guard.profiles.iter().any(|p| p.id == account.id || p.name.to_lowercase() == account.name.to_lowercase());
-                                if !prof_exists {
+                                if let Some(p) = guard.profiles.iter_mut().find(|p| p.id == account.id || p.name.to_lowercase() == account.name.to_lowercase() || p.email.as_ref().map(|e| e.to_lowercase()) == Some(email_lower.clone())) {
+                                    p.id = account.id.clone();
+                                    p.name = account.name.clone();
+                                    p.avatar = account.avatar.clone();
+                                    p.email = Some(account.email.clone());
+                                } else {
                                     guard.profiles.push(UserProfile {
                                         id: account.id.clone(),
                                         name: account.name.clone(),
@@ -395,9 +410,9 @@ fn main() {
                         password: Option<String>,
                     }
                     if let Ok(login_req) = serde_json::from_str::<LoginReq>(&body) {
-                        let guard = state.data.read().unwrap();
+                        let mut guard = state.data.write().unwrap();
                         let email_lower = login_req.email.trim().to_lowercase();
-                        if let Some(account) = guard.accounts.iter().find(|a| a.email.to_lowercase() == email_lower) {
+                        if let Some(account) = guard.accounts.iter().find(|a| a.email.to_lowercase() == email_lower).cloned() {
                             if let Some(ref acc_pwd) = account.password {
                                 if let Some(ref req_pwd) = login_req.password {
                                     if acc_pwd != req_pwd {
@@ -411,7 +426,25 @@ fn main() {
                                     continue;
                                 }
                             }
-                            let profile = guard.profiles.iter().find(|p| p.id == account.id || p.name.to_lowercase() == account.name.to_lowercase()).cloned();
+                            let profile = if let Some(p) = guard.profiles.iter_mut().find(|p| p.id == account.id || p.name.to_lowercase() == account.name.to_lowercase() || p.email.as_ref().map(|e| e.to_lowercase()) == Some(email_lower.clone())) {
+                                p.id = account.id.clone();
+                                p.name = account.name.clone();
+                                p.avatar = account.avatar.clone();
+                                p.email = Some(account.email.clone());
+                                p.clone()
+                            } else {
+                                let new_p = UserProfile {
+                                    id: account.id.clone(),
+                                    name: account.name.clone(),
+                                    avatar: account.avatar.clone(),
+                                    tagline: "Geregistreerde Poeper".into(),
+                                    email: Some(account.email.clone()),
+                                };
+                                guard.profiles.push(new_p.clone());
+                                new_p
+                            };
+                            drop(guard);
+                            state.persist();
                             let json = serde_json::to_string(&serde_json::json!({
                                 "success": true,
                                 "account": account,
