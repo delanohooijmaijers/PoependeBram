@@ -920,6 +920,8 @@ fn main() {
                         user_id: Option<String>,
                         #[serde(rename = "userName")]
                         user_name: Option<String>,
+                        #[serde(rename = "userEmail")]
+                        user_email: Option<String>,
                         delta: Option<i64>,
                         coins: Option<i64>,
                     }
@@ -931,6 +933,16 @@ fn main() {
                         let id_lower = target_id.to_lowercase();
                         let name_lower = target_name.to_lowercase();
 
+                        // Protect registered accounts from unauthorized casino balance changes
+                        if let Some(acc) = guard.accounts.iter().find(|a| (!id_lower.is_empty() && a.id.to_lowercase() == id_lower) || (!name_lower.is_empty() && a.name.to_lowercase() == name_lower)) {
+                            let matches_email = req.user_email.as_ref().map(|e| e.trim().to_lowercase()) == Some(acc.email.trim().to_lowercase());
+                            if !matches_email {
+                                let resp = json_response(r#"{"error":"Dit account is beveiligd met een wachtwoord. Log eerst in om je munten te beheren."}"#, 403);
+                                let _ = request.respond(resp);
+                                continue;
+                            }
+                        }
+
                         let idx = guard.profiles.iter().position(|p| {
                             (!id_lower.is_empty() && p.id.to_lowercase() == id_lower) ||
                             (!name_lower.is_empty() && p.name.to_lowercase() == name_lower)
@@ -940,15 +952,15 @@ fn main() {
                             i
                         } else {
                             // Create default profile for this gambler
-                            let name = if !target_name.is_empty() { target_name.clone() } else { "Bram".to_string() };
-                            let id = if !target_id.is_empty() { target_id.clone() } else { format!("user-{}", name.to_lowercase()) };
-                            let avatar = name.chars().next().unwrap_or('B').to_uppercase().to_string();
+                            let name = if !target_name.is_empty() { target_name.clone() } else { "Gast".to_string() };
+                            let id = if !target_id.is_empty() { target_id.clone() } else { "user-gast".to_string() };
+                            let avatar = name.chars().next().unwrap_or('G').to_uppercase().to_string();
                             guard.profiles.push(UserProfile {
                                 id,
                                 name,
                                 avatar,
                                 tagline: "Casino Gokker".into(),
-                                email: None,
+                                email: req.user_email.clone(),
                                 coins: Some(100),
                             });
                             guard.profiles.len() - 1
@@ -993,32 +1005,45 @@ fn main() {
                         user_id: Option<String>,
                         #[serde(rename = "userName")]
                         user_name: Option<String>,
+                        #[serde(rename = "userEmail")]
+                        user_email: Option<String>,
                     }
 
-                    let req = serde_json::from_str::<FaucetReq>(&body).unwrap_or(FaucetReq { user_id: None, user_name: None });
+                    let req = serde_json::from_str::<FaucetReq>(&body).unwrap_or(FaucetReq { user_id: None, user_name: None, user_email: None });
                     let mut guard = state.data.write().unwrap();
                     let target_id = req.user_id.clone().unwrap_or_default();
                     let target_name = req.user_name.clone().unwrap_or_default();
                     let id_lower = target_id.to_lowercase();
                     let name_lower = target_name.to_lowercase();
 
+                    // Protect registered accounts
+                    if let Some(acc) = guard.accounts.iter().find(|a| (!id_lower.is_empty() && a.id.to_lowercase() == id_lower) || (!name_lower.is_empty() && a.name.to_lowercase() == name_lower)) {
+                        let matches_email = req.user_email.as_ref().map(|e| e.trim().to_lowercase()) == Some(acc.email.trim().to_lowercase());
+                        if !matches_email {
+                            let resp = json_response(r#"{"error":"Dit account is beveiligd met een wachtwoord."}"#, 403);
+                            let _ = request.respond(resp);
+                            continue;
+                        }
+                    }
+
                     let user_idx = if let Some(i) = guard.profiles.iter().position(|p| {
                         (!id_lower.is_empty() && p.id.to_lowercase() == id_lower) ||
                         (!name_lower.is_empty() && p.name.to_lowercase() == name_lower)
                     }) {
                         i
-                    } else if !guard.profiles.is_empty() {
-                        0
                     } else {
+                        let name = if !target_name.is_empty() { target_name.clone() } else { "Gast".to_string() };
+                        let id = if !target_id.is_empty() { target_id.clone() } else { "user-gast".to_string() };
+                        let avatar = name.chars().next().unwrap_or('G').to_uppercase().to_string();
                         guard.profiles.push(UserProfile {
-                            id: "user-bram".into(),
-                            name: "Bram".into(),
-                            avatar: "B".into(),
+                            id,
+                            name,
+                            avatar,
                             tagline: "Casino Gokker".into(),
-                            email: None,
+                            email: req.user_email.clone(),
                             coins: Some(100),
                         });
-                        0
+                        guard.profiles.len() - 1
                     };
 
                     let current = guard.profiles[user_idx].coins.unwrap_or(100);

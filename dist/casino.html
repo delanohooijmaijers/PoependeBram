@@ -89,16 +89,23 @@
       align-items: center;
       gap: 10px;
     }
-    .player-select {
+    .player-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
       background: var(--bg-card);
       border: 1px solid var(--brown-border);
       color: var(--gold-light);
-      padding: 8px 12px;
-      border-radius: 10px;
-      font-weight: 700;
+      padding: 6px 14px;
+      border-radius: 12px;
+      font-weight: 800;
       font-size: 13px;
-      outline: none;
-      cursor: pointer;
+    }
+    .player-avatar {
+      font-size: 15px;
+    }
+    .player-name {
+      color: var(--gold);
     }
     .coins-badge {
       display: flex;
@@ -615,9 +622,10 @@
       </a>
 
       <div class="wallet-bar">
-        <select id="userSelector" class="player-select" onchange="switchUser(this.value)">
-          <option value="">Laden...</option>
-        </select>
+        <div class="player-badge" id="playerBadge" title="Jouw actieve account">
+          <span class="player-avatar" id="playerAvatar">💩</span>
+          <span class="player-name" id="playerName">Laden...</span>
+        </div>
 
         <div class="coins-badge" title="Jouw Poep Munten Balans">
           <span class="icon">💩</span>
@@ -923,62 +931,71 @@
       playTick();
     }
 
-    // --- USER / PROFILE MANAGEMENT ---
+    // --- USER / PROFILE MANAGEMENT (Strictly Single User) ---
     async function initUsers() {
       try {
         const res = await fetch('/api/casino/balance');
         const data = await res.json();
-        if (data.profiles && data.profiles.length > 0) {
+        if (data.profiles && Array.isArray(data.profiles)) {
           profiles = data.profiles;
+        } else if (Array.isArray(data)) {
+          profiles = data;
         } else {
-          profiles = [{ id: 'user-bram', name: 'Bram', coins: 150 }];
+          profiles = [];
         }
       } catch (e) {
-        profiles = [{ id: 'user-bram', name: 'Bram', coins: 150 }];
+        profiles = [];
       }
 
-      // Check localStorage for saved account/user
-      let preferredId = null;
+      // Check localStorage for authenticated account
+      let activeAccount = null;
       try {
-        const savedAccount = localStorage.getItem('account');
+        const savedAccount = localStorage.getItem('@poepende_bram_current_account_v5') || localStorage.getItem('account');
         if (savedAccount) {
-          const acc = JSON.parse(savedAccount);
-          if (acc.id) preferredId = acc.id;
+          activeAccount = JSON.parse(savedAccount);
         }
       } catch(e){}
 
-      const select = document.getElementById('userSelector');
-      select.innerHTML = '';
-      profiles.forEach(p => {
-        const opt = document.createElement('option');
-        opt.value = p.id;
-        opt.textContent = `${p.avatar ? p.avatar + ' ' : ''}${p.name} (${p.coins || 100} 💩)`;
-        select.appendChild(opt);
-      });
-
-      if (preferredId && profiles.some(p => p.id === preferredId)) {
-        select.value = preferredId;
+      if (activeAccount && activeAccount.id) {
+        const found = profiles.find(p => p.id === activeAccount.id || (p.email && activeAccount.email && p.email.toLowerCase() === activeAccount.email.toLowerCase()));
+        if (found) {
+          currentUser = found;
+          currentUser.name = activeAccount.name || currentUser.name;
+          currentUser.avatar = activeAccount.avatar || currentUser.avatar;
+          currentUser.email = activeAccount.email || currentUser.email;
+        } else {
+          currentUser = {
+            id: activeAccount.id,
+            name: activeAccount.name,
+            avatar: activeAccount.avatar || 'P',
+            email: activeAccount.email,
+            coins: 100
+          };
+        }
+      } else {
+        // Strictly guest - never defaults to someone else's account
+        currentUser = {
+          id: 'gast',
+          name: 'Gast',
+          avatar: 'G',
+          coins: 100
+        };
       }
 
-      switchUser(select.value);
-    }
-
-    function switchUser(userId) {
-      currentUser = profiles.find(p => p.id === userId) || profiles[0];
-      if (currentUser) {
-        updateCoinsDisplay(currentUser.coins || 100);
-      }
+      updateCoinsDisplay(currentUser.coins || 100);
     }
 
     function updateCoinsDisplay(val) {
       if (currentUser) currentUser.coins = val;
       const el = document.getElementById('coinsDisplay');
-      el.textContent = `${val} 💩`;
-      // Update dropdown label
-      const select = document.getElementById('userSelector');
-      const opt = select.querySelector(`option[value="${currentUser.id}"]`);
-      if (opt) {
-        opt.textContent = `${currentUser.avatar ? currentUser.avatar + ' ' : ''}${currentUser.name} (${val} 💩)`;
+      if (el) el.textContent = `${val} 💩`;
+      const nameEl = document.getElementById('playerName');
+      if (nameEl && currentUser) {
+        nameEl.textContent = currentUser.name;
+      }
+      const avatarEl = document.getElementById('playerAvatar');
+      if (avatarEl && currentUser) {
+        avatarEl.textContent = currentUser.avatar || '💩';
       }
     }
 
@@ -994,6 +1011,7 @@
           body: JSON.stringify({
             userId: currentUser.id,
             userName: currentUser.name,
+            userEmail: currentUser.email || undefined,
             coins: newCoins
           })
         });
@@ -1010,18 +1028,24 @@
         const res = await fetch('/api/casino/faucet', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: currentUser.id, userName: currentUser.name })
+          body: JSON.stringify({
+            userId: currentUser.id,
+            userName: currentUser.name,
+            userEmail: currentUser.email || undefined
+          })
         });
         const data = await res.json();
         if (data.coins !== undefined) {
           updateCoinsDisplay(data.coins);
           playWinSound();
           showToast(data.message || '💨 Lekker geperst! +50 Poep Munten verdiend!');
+          return;
         }
       } catch(e) {
-        modifyCoins(50);
-        showToast('💨 Lekker geperst! +50 Poep Munten verdiend!');
+        // Fallback
       }
+      modifyCoins(50);
+      showToast('💨 Lekker geperst! +50 Poep Munten verdiend!');
     }
 
     // --- GAME 1: SLOTS ---
