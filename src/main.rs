@@ -164,6 +164,215 @@ fn get_mime_type(path: &Path) -> &'static str {
     }
 }
 
+fn parse_dutch_date_to_iso(raw: &str) -> String {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return "2024-01-01T12:00:00.000Z".to_string();
+    }
+    if raw.contains('T') {
+        return raw.to_string();
+    }
+
+    let parts: Vec<&str> = raw.split_whitespace().collect();
+    let date_str = parts.first().copied().unwrap_or(raw);
+    let time_str = if parts.len() > 1 {
+        let t = parts[1];
+        if t.len() == 5 {
+            format!("{}:00", t)
+        } else {
+            t.to_string()
+        }
+    } else {
+        "12:00:00".to_string()
+    };
+
+    let delimiter = if date_str.contains('-') {
+        '-'
+    } else if date_str.contains('/') {
+        '/'
+    } else if date_str.contains('.') {
+        '.'
+    } else {
+        '-'
+    };
+
+    let segments: Vec<&str> = date_str.split(delimiter).collect();
+    if segments.len() == 3 {
+        let (y, m, d) = if segments[0].len() == 4 {
+            (segments[0], segments[1], segments[2])
+        } else {
+            (segments[2], segments[1], segments[0])
+        };
+        let mut y_val = y.parse::<u32>().unwrap_or(2024);
+        if y_val < 100 {
+            y_val += 2000;
+        }
+        let m_val = m.parse::<u32>().unwrap_or(1).min(12).max(1);
+        let d_val = d.parse::<u32>().unwrap_or(1).min(31).max(1);
+        return format!("{:04}-{:02}-{:02}T{}.000Z", y_val, m_val, d_val, time_str);
+    }
+
+    format!("{}T12:00:00.000Z", raw)
+}
+
+fn geocode_dutch_location(loc: &str, index: usize) -> (f64, f64) {
+    let lower = loc.to_lowercase();
+    if lower.contains("amsterdam") { return (52.3676, 4.9041); }
+    if lower.contains("rotterdam") { return (51.9244, 4.4777); }
+    if lower.contains("den haag") || lower.contains("'s-gravenhage") || lower.contains("scheveningen") { return (52.0705, 4.3007); }
+    if lower.contains("utrecht") { return (52.0907, 5.1214); }
+    if lower.contains("eindhoven") { return (51.4416, 5.4697); }
+    if lower.contains("groningen") { return (53.2194, 6.5665); }
+    if lower.contains("tilburg") { return (51.5555, 5.0913); }
+    if lower.contains("almere") { return (52.3508, 5.2647); }
+    if lower.contains("breda") { return (51.5719, 4.7683); }
+    if lower.contains("nijmegen") { return (51.8126, 5.8372); }
+    if lower.contains("enschede") { return (52.2215, 6.8937); }
+    if lower.contains("haarlem") { return (52.3874, 4.6462); }
+    if lower.contains("arnhem") { return (51.9851, 5.8987); }
+    if lower.contains("amersfoort") { return (52.1561, 5.3878); }
+    if lower.contains("zaanstad") || lower.contains("zaandam") { return (52.4420, 4.8292); }
+    if lower.contains("den bosch") || lower.contains("'s-hertogenbosch") { return (51.6978, 5.3037); }
+    if lower.contains("zwolle") { return (52.5168, 6.0830); }
+    if lower.contains("leiden") { return (52.1601, 4.4970); }
+    if lower.contains("leeuwarden") { return (53.2012, 5.7999); }
+    if lower.contains("maastricht") { return (50.8514, 5.6910); }
+    if lower.contains("dordrecht") { return (51.8133, 4.6901); }
+    if lower.contains("ede") { return (52.0436, 5.6664); }
+    if lower.contains("alphen") { return (52.1290, 4.6555); }
+    if lower.contains("alkmaar") { return (52.6324, 4.7534); }
+    if lower.contains("delft") { return (52.0116, 4.3571); }
+    if lower.contains("venlo") { return (51.3704, 6.1724); }
+    if lower.contains("deventer") { return (52.2550, 6.1625); }
+    if lower.contains("hilversum") { return (52.2292, 5.1764); }
+    if lower.contains("gouda") { return (52.0116, 4.7105); }
+
+    let hash = loc.bytes().fold(index as u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
+    let offset_lat = ((hash % 1000) as f64 / 1000.0 - 0.5) * 0.4;
+    let offset_lng = (((hash / 1000) % 1000) as f64 / 1000.0 - 0.5) * 0.6;
+    (52.1326 + offset_lat, 5.2913 + offset_lng)
+}
+
+fn looks_like_date(s: &str) -> bool {
+    let s = s.trim();
+    if s.len() >= 8 && (s.contains('-') || s.contains('/') || s.contains('.')) {
+        let first_char = s.chars().next().unwrap_or(' ');
+        first_char.is_ascii_digit()
+    } else {
+        false
+    }
+}
+
+fn parse_duration_string(s: &str) -> u32 {
+    let s = s.trim().to_lowercase();
+    if s.contains(':') {
+        let parts: Vec<&str> = s.split(':').collect();
+        if parts.len() == 2 {
+            let m = parts[0].parse::<u32>().unwrap_or(5);
+            let sec = parts[1].parse::<u32>().unwrap_or(0);
+            return m * 60 + sec;
+        }
+    }
+    let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
+    let num = digits.parse::<u32>().unwrap_or(5);
+    if s.contains("sec") {
+        num
+    } else if num > 60 && !s.contains("min") && !s.contains('m') {
+        num
+    } else {
+        num * 60
+    }
+}
+
+fn parse_rating_string(s: &str) -> u8 {
+    let s = s.trim();
+    let stars = s.chars().filter(|&c| c == '⭐' || c == '*').count();
+    if stars > 0 {
+        return (stars as u8).min(5).max(1);
+    }
+    let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
+    digits.parse::<u8>().unwrap_or(4).min(5).max(1)
+}
+
+fn rand_simple_id() -> u32 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(12345) % 100_000
+}
+
+fn parse_csv_lines(text: &str, user: &str, avatar: &str, user_id: &str) -> Vec<ToiletSession> {
+    let mut sessions = Vec::new();
+    let lines: Vec<&str> = text.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+
+    for (idx, line) in lines.iter().enumerate() {
+        let lower_line = line.to_lowercase();
+        if idx == 0 && (lower_line.contains("datum") || lower_line.contains("date")) && (lower_line.contains("locatie") || lower_line.contains("location")) {
+            continue;
+        }
+
+        let delimiter = if line.contains('\t') {
+            '\t'
+        } else if line.contains(';') {
+            ';'
+        } else if line.contains('|') {
+            '|'
+        } else {
+            ','
+        };
+
+        let parts: Vec<&str> = line.split(delimiter).map(|p| p.trim()).collect();
+        if parts.is_empty() {
+            continue;
+        }
+
+        let (raw_date, raw_loc, duration_part, rating_part, notes_part) = if looks_like_date(parts[0]) {
+            let d = parts[0];
+            let l = parts.get(1).copied().unwrap_or("WC Onbekend");
+            let dur = parts.get(2).copied();
+            let rat = parts.get(3).copied();
+            let not = parts.get(4).copied();
+            (d, l, dur, rat, not)
+        } else if parts.len() > 1 && looks_like_date(parts[1]) {
+            let l = parts[0];
+            let d = parts[1];
+            let dur = parts.get(2).copied();
+            let rat = parts.get(3).copied();
+            let not = parts.get(4).copied();
+            (d, l, dur, rat, not)
+        } else {
+            ("2024-01-01", parts[0], parts.get(1).copied(), parts.get(2).copied(), parts.get(3).copied())
+        };
+
+        let timestamp = parse_dutch_date_to_iso(raw_date);
+        let (lat, lng) = geocode_dutch_location(raw_loc, idx);
+
+        let duration_seconds = parse_duration_string(duration_part.unwrap_or("5"));
+        let rating = parse_rating_string(rating_part.unwrap_or("4"));
+        let notes = notes_part.filter(|s| !s.is_empty()).map(|s| s.to_string());
+
+        let id = format!("sess-imp-{}-{}", idx, rand_simple_id());
+        sessions.push(ToiletSession {
+            id,
+            user_id: user_id.to_string(),
+            user_name: user.to_string(),
+            user_avatar: avatar.to_string(),
+            location_name: raw_loc.to_string(),
+            latitude: lat,
+            longitude: lng,
+            timestamp,
+            duration_seconds,
+            rating,
+            poop_type: Some("De Vlotte Boodschap".into()),
+            notes,
+            tags: None,
+            user_email: None,
+        });
+    }
+
+    sessions
+}
+
 fn json_response(body: &str, status: u16) -> Response<std::io::Cursor<Vec<u8>>> {
     Response::from_data(body.as_bytes().to_vec())
         .with_status_code(StatusCode(status))
@@ -286,6 +495,158 @@ fn main() {
                             }
                         }
                         _ => {}
+                    }
+                }
+
+                // REST API: POST /api/sessions/batch
+                if path_part == "/api/sessions/batch" && request.method() == &Method::Post {
+                    let mut body = String::new();
+                    let _ = request.as_reader().read_to_string(&mut body);
+                    let mut new_sessions = Vec::new();
+
+                    if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&body) {
+                        let items_opt = if let Some(arr) = json_val.as_array() {
+                            Some(arr.clone())
+                        } else if let Some(arr) = json_val.get("sessions").and_then(|s| s.as_array()) {
+                            Some(arr.clone())
+                        } else {
+                            None
+                        };
+
+                        if let Some(items) = items_opt {
+                            for (idx, item) in items.iter().enumerate() {
+                                let loc = item.get("locationName")
+                                    .or_else(|| item.get("location"))
+                                    .or_else(|| item.get("locatie"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("WC Onbekend")
+                                    .to_string();
+
+                                let raw_date = item.get("timestamp")
+                                    .or_else(|| item.get("date"))
+                                    .or_else(|| item.get("datum"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                let timestamp = parse_dutch_date_to_iso(raw_date);
+
+                                let (lat, lng) = if let (Some(la), Some(lo)) = (
+                                    item.get("latitude").and_then(|v| v.as_f64()),
+                                    item.get("longitude").and_then(|v| v.as_f64()),
+                                ) {
+                                    (la, lo)
+                                } else {
+                                    geocode_dutch_location(&loc, idx)
+                                };
+
+                                let duration = item.get("durationSeconds")
+                                    .or_else(|| item.get("duration"))
+                                    .or_else(|| item.get("duur"))
+                                    .and_then(|v| v.as_u64())
+                                    .map(|v| v as u32)
+                                    .unwrap_or(300);
+
+                                let rating = item.get("rating")
+                                    .and_then(|v| v.as_u64())
+                                    .map(|v| v.min(5).max(1) as u8)
+                                    .unwrap_or(4);
+
+                                let poop_type = item.get("poopType")
+                                    .or_else(|| item.get("type"))
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string())
+                                    .or_else(|| Some("De Vlotte Boodschap".into()));
+
+                                let notes = item.get("notes")
+                                    .or_else(|| item.get("notitie"))
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string());
+
+                                let user_name = item.get("userName")
+                                    .or_else(|| item.get("user"))
+                                    .or_else(|| item.get("naam"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("Bram")
+                                    .to_string();
+
+                                let user_avatar = item.get("userAvatar")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| user_name.chars().next().unwrap_or('P').to_uppercase().to_string());
+
+                                let user_id = item.get("userId")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| format!("user-{}", user_name.to_lowercase()));
+
+                                let user_email = item.get("userEmail")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string());
+
+                                let sess_id = item.get("id")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| format!("sess-imp-{}-{}", idx, rand_simple_id()));
+
+                                new_sessions.push(ToiletSession {
+                                    id: sess_id,
+                                    user_id,
+                                    user_name,
+                                    user_avatar,
+                                    location_name: loc,
+                                    latitude: lat,
+                                    longitude: lng,
+                                    timestamp,
+                                    duration_seconds: duration,
+                                    rating,
+                                    poop_type,
+                                    notes,
+                                    tags: None,
+                                    user_email,
+                                });
+                            }
+                        } else if let Some(raw_text) = json_val.get("text").or_else(|| json_val.get("csv")).and_then(|v| v.as_str()) {
+                            let default_user = json_val.get("userName").or_else(|| json_val.get("user")).and_then(|v| v.as_str()).unwrap_or("Bram");
+                            let default_avatar = json_val.get("userAvatar").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| default_user.chars().next().unwrap_or('P').to_uppercase().to_string());
+                            let default_user_id = format!("user-{}", default_user.to_lowercase());
+                            new_sessions = parse_csv_lines(raw_text, default_user, &default_avatar, &default_user_id);
+                        }
+                    } else {
+                        // Plain text or CSV in raw request body
+                        new_sessions = parse_csv_lines(&body, "Bram", "B", "user-bram");
+                    }
+
+                    if !new_sessions.is_empty() {
+                        let mut guard = state.data.write().unwrap();
+                        let count = new_sessions.len();
+                        for s in new_sessions {
+                            let prof_exists = guard.profiles.iter().any(|p| p.id == s.user_id || p.name.to_lowercase() == s.user_name.to_lowercase());
+                            if !prof_exists {
+                                guard.profiles.push(UserProfile {
+                                    id: s.user_id.clone(),
+                                    name: s.user_name.clone(),
+                                    avatar: s.user_avatar.clone(),
+                                    tagline: "Geregistreerde Poeper".into(),
+                                    email: s.user_email.clone(),
+                                });
+                            }
+                            guard.sessions.retain(|existing| existing.id != s.id);
+                            guard.sessions.push(s);
+                        }
+                        guard.sessions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+                        let list = guard.sessions.clone();
+                        drop(guard);
+                        state.persist();
+                        let resp = json_response(&serde_json::json!({
+                            "success": true,
+                            "imported": count,
+                            "sessions": list
+                        }).to_string(), 200);
+                        let _ = request.respond(resp);
+                        continue;
+                    } else {
+                        let resp = json_response(r#"{"success":false,"error":"Geen geldige bezoeken gevonden om te importeren."}"#, 400);
+                        let _ = request.respond(resp);
+                        continue;
                     }
                 }
 

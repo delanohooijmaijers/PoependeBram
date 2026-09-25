@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+  <title>Poepende Bram — Bulk Bezoeken Importeren</title>
+  <link rel="icon" href="/favicon.ico" />
+  <style>
+    :root {
+      --primary: #5D4037;
+      --primary-dark: #3E2723;
+      --accent: #D97706;
+      --bg: #FAF7F2;
+      --card-bg: #FFFFFF;
+      --border: #E6DFD5;
+      --text: #2D241E;
+      --text-muted: #786C62;
+      --success: #16A34A;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 20px 16px 60px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 2px solid var(--border);
+    }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .header-icon {
+      font-size: 32px;
+      background: #EFEBE4;
+      width: 52px;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 16px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+    }
+    h1 {
+      font-size: 24px;
+      color: var(--primary-dark);
+      font-weight: 800;
+    }
+    .subtitle {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .back-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: var(--primary);
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+    .back-btn:hover {
+      background: #F3EFEA;
+    }
+    .card {
+      background: var(--card-bg);
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      padding: 24px;
+      box-shadow: 0 4px 14px rgba(62, 39, 35, 0.05);
+      margin-bottom: 20px;
+    }
+    .section-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--primary-dark);
+      margin-bottom: 8px;
+    }
+    .section-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+    .form-group {
+      margin-bottom: 18px;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--primary);
+      margin-bottom: 6px;
+    }
+    input[type="text"], select, textarea {
+      width: 100%;
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 14px;
+      color: var(--text);
+      background: #FCFBF9;
+      font-family: inherit;
+      transition: border-color 0.2s;
+    }
+    input[type="text"]:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      background: #FFFFFF;
+    }
+    textarea {
+      min-height: 180px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      white-space: pre;
+    }
+    .examples {
+      background: #F5EFEB;
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 12px;
+      color: var(--primary-dark);
+      margin-top: 8px;
+    }
+    .examples code {
+      display: block;
+      font-family: monospace;
+      color: var(--primary);
+      margin-top: 4px;
+      font-weight: 600;
+    }
+    .user-row {
+      display: flex;
+      gap: 12px;
+    }
+    .user-row > div {
+      flex: 1;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      padding: 14px 20px;
+      border-radius: 14px;
+      font-size: 15px;
+      font-weight: 800;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: #FFFFFF;
+      box-shadow: 0 4px 12px rgba(93, 64, 55, 0.25);
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: var(--primary-dark);
+      transform: translateY(-1px);
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .preview-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 800;
+      background: #E8F5E9;
+      color: var(--success);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-top: 8px;
+    }
+    th {
+      text-align: left;
+      padding: 8px 10px;
+      background: #F4EFEB;
+      color: var(--primary);
+      font-weight: 700;
+      border-radius: 6px;
+    }
+    td {
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .table-container {
+      max-height: 280px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .alert {
+      padding: 14px 16px;
+      border-radius: 12px;
+      font-size: 14px;
+      margin-bottom: 16px;
+      display: none;
+    }
+    .alert-success {
+      background: #DEF7EC;
+      color: #03543F;
+      border: 1px solid #BCF0DA;
+    }
+    .alert-error {
+      background: #FDE8E8;
+      color: #9B1C1C;
+      border: 1px solid #FBD5D5;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <div class="header-icon">💩</div>
+        <div>
+          <h1>Bulk Bezoeken Importeren</h1>
+          <div class="subtitle">Voeg in Ã©Ã©n klap oudere poepbezoeken toe</div>
+        </div>
+      </div>
+      <a href="/" class="back-btn">⬅ Naar App</a>
+    </header>
+
+    <div id="alertBox" class="alert"></div>
+
+    <div class="card">
+      <div class="section-title">1. Voor wie zijn deze bezoeken?</div>
+      <div class="section-desc">Kies een bestaande poeper of voer een naam in voor je vriend.</div>
+      
+      <div class="user-row">
+        <div class="form-group">
+          <label for="profileSelect">Bestaand Profiel</label>
+          <select id="profileSelect">
+            <option value="">Laden...</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="customNameInput">Of Nieuwe Naam</label>
+          <input type="text" id="customNameInput" placeholder="Bijv. Tim, Bram, Sophie..." />
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">2. Plak je bezoekenlijst</div>
+      <div class="section-desc">
+        Kopieer en plak regels uit Excel, Google Sheets, Notities of een CSV bestand.
+      </div>
+
+      <div class="form-group">
+        <label for="bulkTextInput">Data / Regels</label>
+        <textarea id="bulkTextInput" placeholder="Plak hier je regels uit Excel of CSV...
+Voorbeeld:
+14-05-2023, Station Utrecht, 5 min, 4, Lekker rustig
+2023-06-12 | Shell A2 Amsterdam | 8 min | 5 | Royale troon
+02/09/2023; CafÃ© De Witte Bal Breda; 3 min; 3"></textarea>
+      </div>
+
+      <div class="examples">
+        <strong>Ondersteunde formaten per regel:</strong>
+        <code>[Datum], [Locatie], [Optioneel: Duur], [Optioneel: Rating 1-5], [Optioneel: Notitie]</code>
+        <span>Scheidingstekens kunnen komma (,), puntkomma (;), tab of pipe (|) zijn. Datums mogen <code>DD-MM-YYYY</code> of <code>YYYY-MM-DD</code> zijn. Nederlandse steden krijgen automatisch een stip op de kaart!</span>
+      </div>
+    </div>
+
+    <div class="card" id="previewCard" style="display: none;">
+      <div class="preview-header">
+        <div class="section-title" style="margin-bottom: 0;">3. Voorbeeld van herkende bezoeken</div>
+        <div class="badge" id="previewCount">0 bezoeken</div>
+      </div>
+
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Datum</th>
+              <th>Locatie</th>
+              <th>Duur</th>
+              <th>Rating</th>
+              <th>Notitie</th>
+            </tr>
+          </thead>
+          <tbody id="previewBody"></tbody>
+        </table>
+      </div>
+
+      <div style="margin-top: 18px;">
+        <button id="importBtn" class="btn btn-primary">
+          🚀 Alles Importeren naar Poepende Bram
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let parsedSessions = [];
+    const profileSelect = document.getElementById('profileSelect');
+    const customNameInput = document.getElementById('customNameInput');
+    const bulkTextInput = document.getElementById('bulkTextInput');
+    const previewCard = document.getElementById('previewCard');
+    const previewCount = document.getElementById('previewCount');
+    const previewBody = document.getElementById('previewBody');
+    const importBtn = document.getElementById('importBtn');
+    const alertBox = document.getElementById('alertBox');
+
+    // Laad profielen van server
+    async function loadProfiles() {
+      try {
+        const res = await fetch('/api/profiles');
+        if (res.ok) {
+          const profiles = await res.json();
+          profileSelect.innerHTML = '<option value="">-- Kies een poeper --</option>';
+          profiles.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p.name;
+            opt.textContent = `${p.name} (${p.avatar})`;
+            profileSelect.appendChild(opt);
+          });
+        }
+      } catch (err) {
+        profileSelect.innerHTML = '<option value="Bram">Bram (B)</option>';
+      }
+    }
+    loadProfiles();
+
+    function getSelectedUser() {
+      const custom = customNameInput.value.trim();
+      if (custom) return custom;
+      const selected = profileSelect.value;
+      if (selected) return selected;
+      return "Bram";
+    }
+
+    function parseLine(line, idx) {
+      line = line.trim();
+      if (!line) return null;
+      if (/^(datum|date)/i.test(line) && /(locatie|location)/i.test(line)) return null;
+
+      let delimiter = ',';
+      if (line.includes('\t')) delimiter = '\t';
+      else if (line.includes(';')) delimiter = ';';
+      else if (line.includes('|')) delimiter = '|';
+
+      const parts = line.split(delimiter).map(p => p.trim());
+      if (parts.length === 0) return null;
+
+      let rawDate = parts[0];
+      let rawLoc = parts[1] || "WC Onbekend";
+      let rawDur = parts[2] || "5 min";
+      let rawRat = parts[3] || "4";
+      let rawNote = parts[4] || "";
+
+      // Als kolom 1 locatie is en kolom 2 datum
+      if (!/^\d/.test(rawDate) && /^\d/.test(rawLoc)) {
+        const tmp = rawDate;
+        rawDate = rawLoc;
+        rawLoc = tmp;
+      }
+
+      // Duur parse
+      let durSec = 300;
+      const numMatch = rawDur.match(/\d+/);
+      if (numMatch) {
+        const num = parseInt(numMatch[0], 10);
+        durSec = /sec/i.test(rawDur) ? num : (num > 60 && !/min/i.test(rawDur) ? num : num * 60);
+      }
+
+      // Rating parse
+      let rating = 4;
+      const stars = (rawRat.match(/[⭐*]/g) || []).length;
+      if (stars > 0) {
+        rating = Math.min(5, Math.max(1, stars));
+      } else {
+        const rMatch = rawRat.match(/\d+/);
+        if (rMatch) rating = Math.min(5, Math.max(1, parseInt(rMatch[0], 10)));
+      }
+
+      return {
+        date: rawDate,
+        location: rawLoc,
+        duration: durSec,
+        rating: rating,
+        notes: rawNote
+      };
+    }
+
+    function updatePreview() {
+      const text = bulkTextInput.value;
+      const lines = text.split('\n');
+      parsedSessions = [];
+
+      lines.forEach((l, i) => {
+        const parsed = parseLine(l, i);
+        if (parsed) parsedSessions.push(parsed);
+      });
+
+      if (parsedSessions.length > 0) {
+        previewCard.style.display = 'block';
+        previewCount.textContent = `${parsedSessions.length} bezoeken herkend`;
+        previewBody.innerHTML = '';
+        parsedSessions.slice(0, 50).forEach((s, i) => {
+          const tr = document.createElement('tr');
+          const min = Math.floor(s.duration / 60);
+          tr.innerHTML = `
+            <td style="color: var(--text-muted); font-size: 11px;">${i + 1}</td>
+            <td><strong>${s.date}</strong></td>
+            <td>${s.location}</td>
+            <td>${min} min</td>
+            <td>${'⭐'.repeat(s.rating)}</td>
+            <td style="color: var(--text-muted);">${s.notes || '-'}</td>
+          `;
+          previewBody.appendChild(tr);
+        });
+        if (parsedSessions.length > 50) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td colspan="6" style="text-align: center; color: var(--text-muted); font-style: italic;">... en nog ${parsedSessions.length - 50} bezoeken</td>`;
+          previewBody.appendChild(tr);
+        }
+      } else {
+        previewCard.style.display = 'none';
+      }
+    }
+
+    bulkTextInput.addEventListener('input', updatePreview);
+
+    importBtn.addEventListener('click', async () => {
+      if (parsedSessions.length === 0) return;
+      const user = getSelectedUser();
+      importBtn.disabled = true;
+      importBtn.textContent = '⏳ Bezig met importeren...';
+      alertBox.style.display = 'none';
+
+      try {
+        const res = await fetch('/api/sessions/batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            csv: bulkTextInput.value,
+            userName: user,
+            userAvatar: user.charAt(0).toUpperCase()
+          })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+          alertBox.className = 'alert alert-success';
+          alertBox.style.display = 'block';
+          alertBox.innerHTML = `🎉 <strong>Geweldig!</strong> Er zijn succesvol <strong>${data.imported}</strong> bezoeken toegevoegd voor <strong>${user}</strong>.<br/><br/><a href="/" style="color: #03543F; font-weight: 800; text-decoration: underline;">⬅ Ga terug naar de app om ze te bekijken!</a>`;
+          bulkTextInput.value = '';
+          previewCard.style.display = 'none';
+        } else {
+          alertBox.className = 'alert alert-error';
+          alertBox.style.display = 'block';
+          alertBox.textContent = `Fout bij importeren: ${data.error || 'Onbekende fout'}`;
+        }
+      } catch (err) {
+        alertBox.className = 'alert alert-error';
+        alertBox.style.display = 'block';
+        alertBox.textContent = `Verbindingsfout: ${err.message || err}`;
+      } finally {
+        importBtn.disabled = false;
+        importBtn.textContent = '🚀 Alles Importeren naar Poepende Bram';
+      }
+    });
+  </script>
+</body>
+</html>
